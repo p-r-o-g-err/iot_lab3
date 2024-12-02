@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top-controls">
+    <h2>Мониторинг влажности почвы</h2>
+    <a href="{{ url_for('logout') }}" class="btn">Выйти</a>
+</div>
+
+<div class="form-group">
+    <h3>Настройки</h3>
+    <form method="POST" action="{{ url_for('settings') }}">
+        <div class="form-inline">
+            <label for="min_moisture">Минимальный уровень:</label>
+            <input type="number" name="min_moisture" id="min_moisture" step="1" min="0" max="100" value="30" required>
+        </div>
+        <div class="form-inline">
+            <label for="max_moisture">Максимальный уровень:</label>
+            <input type="number" name="max_moisture" id="max_moisture" step="1" min="0" max="100" value="70" required>
+        </div>
+        <button type="submit" class="btn">Сохранить</button>
+    </form>
+</div>
+
+<div class="form-group">
+    <h3>Текущая влажность почвы: <span id="moisture_level">--</span> %</h3>
+    <p>Статус насоса: <span id="pump_status">Unknown</span></p>
+</div>
+
+<div class="chart" id="moistureChart"></div>
+
+<script>
+// Инициализация графика
+let minMoisture = 30;
+let maxMoisture = 70;
+
+let trace = {
+    x: [],
+    y: [],
+    type: 'scatter',
+    mode: 'lines+markers',
+    name: 'Влажность почвы'
+};
+
+let minTrace = {
+    x: [],
+    y: [],
+    type: 'scatter',
+    mode: 'lines',
+    name: 'Мин. влажность',
+    line: {color: 'red', dash: 'dot'}
+};
+
+let maxTrace = {
+    x: [],
+    y: [],
+    type: 'scatter',
+    mode: 'lines',
+    name: 'Макс. влажность',
+    line: {color: 'red', dash: 'dot'}
+};
+
+let layout = {
+    title: 'Влажность со временем',
+    xaxis: { title: 'Дата и время', tickangle: -45, automargin: true },
+    yaxis: { title: 'Влажность (%)' }
+};
+
+Plotly.newPlot('moistureChart', [trace, minTrace, maxTrace], layout);
+
+function updateSettings() {
+    fetch('/api/settings')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('min_moisture').value = data.min_moisture;
+            minMoisture = data.min_moisture;
+            document.getElementById('max_moisture').value = data.max_moisture;
+            maxMoisture = data.max_moisture;
+        });
+}
+
+function updateData() {
+    fetch('/api/current_moisture')
+        .then(response => response.json())
+        .then(data => {
+            if (data.moisture_level !== null) {
+                document.getElementById('moisture_level').textContent = data.moisture_level.toFixed(1);
+                document.getElementById('pump_status').textContent = data.pump_status;
+            
+                // Обновляем основной график
+                if (data.timestamp && (new Date(data.timestamp)).toLocaleString() == trace.x[trace.x.length - 1]) {
+                    return;
+                }
+
+                trace.x.push(new Date(data.timestamp).toLocaleString());
+                trace.y.push(data.moisture_level);
+
+                // Ограничиваем количество точек
+                if (trace.x.length > 30) {
+                    trace.x.shift();
+                    trace.y.shift();
+                }
+
+                // Обновляем линии
+                minTrace.x = [...trace.x];
+                minTrace.y = Array(trace.x.length).fill(minMoisture);
+
+                maxTrace.x = [...trace.x];
+                maxTrace.y = Array(trace.x.length).fill(maxMoisture);
+
+                // Перерисовываем график
+                Plotly.react('moistureChart', [trace, minTrace, maxTrace], layout);
+            } else {
+                document.getElementById('moisture_level').textContent = "--";
+                document.getElementById('pump_status').textContent = "Нет данных";
+            }
+        });
+}
+
+function loadHistoricalData() {
+    fetch('/api/moisture_history')
+        .then(response => response.json())
+        .then(data => {
+             // Загружаем исторические данные
+             data.forEach(item => {
+                trace.x.push(new Date(item.timestamp).toLocaleString());
+                trace.y.push(item.moisture_level);
+            });
+
+            minTrace.x = [...trace.x];
+            minTrace.y = Array(trace.x.length).fill(minMoisture);
+
+            maxTrace.x = [...trace.x];
+            maxTrace.y = Array(trace.x.length).fill(maxMoisture);
+
+            // Перерисовываем график
+            Plotly.react('moistureChart', [trace, minTrace, maxTrace], layout);
+        });
+}
+
+// Получение настроек
+updateSettings();
+// Загрузка истории при первой загрузке страницы
+loadHistoricalData();
+// Обновление данных каждые 2 секунды
+setInterval(updateData, 1000);
+</script>
+{% endblock %}
